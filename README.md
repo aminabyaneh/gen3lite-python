@@ -6,8 +6,6 @@ This wrapper is built based on the official [Kinova Kortex2 API](https://github.
 
 The official repository contains documentation and examples explaining how to use the Kortex Python.
 
-<img src="resources/graphics.png" alt="alt text" height="400" width="500">
-
 
 ## Instructions
 
@@ -34,3 +32,7 @@ The official repository contains documentation and examples explaining how to us
 The LED on the robot can signal the current status of the firmware.
 
 <img src="resources/lights.png" alt="alt text" width="500">
+
+The robot's different mounting components.
+
+<img src="resources/arm.png" alt="alt text" width="500">
