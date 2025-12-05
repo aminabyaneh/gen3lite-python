@@ -50,7 +50,7 @@ def example_move_to_home_position(base):
     base_servo_mode = Base_pb2.ServoingModeInformation()
     base_servo_mode.servoing_mode = Base_pb2.SINGLE_LEVEL_SERVOING
     base.SetServoingMode(base_servo_mode)
-
+    
     # Move arm to ready position
     print("Moving the arm to a safe position")
     action_type = Base_pb2.RequestedActionType()
@@ -70,9 +70,9 @@ def example_move_to_home_position(base):
         check_for_end_or_abort(e),
         Base_pb2.NotificationOptions()
     )
-
+    
     base.ExecuteActionFromReference(action_handle)
-
+    
     # Leave time to action to complete
     finished = e.wait(TIMEOUT_DURATION)
     base.Unsubscribe(notification_handle)
@@ -98,13 +98,13 @@ def example_twist_command(base):
     twist.angular_y = 0
     twist.angular_z = 5
 
-    print("Sending the twist command for 5 seconds...")
+    print ("Sending the twist command for 5 seconds...")
     base.SendTwistCommand(command)
 
     # Let time for twist to be executed
     time.sleep(5)
 
-    print("Stopping the robot...")
+    print ("Stopping the robot...")
     base.Stop()
     time.sleep(1)
 
@@ -117,7 +117,7 @@ def main():
 
     # Parse arguments
     args = utilities.parseConnectionArguments()
-
+    
     # Create connection to the device and get the router
     with utilities.DeviceConnection.createTcpConnection(args) as router:
 

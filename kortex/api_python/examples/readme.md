@@ -18,7 +18,7 @@
 
 - [Setup (Python environment)](#setup-python-environment)
   - [Required Python version and module](#required-python-version-and-module)
-  - [Install Kortex Python API and required dependencies](#install-kortex-python-api-and-required-dependencies)
+  - [Install KINOVA KORTEX™ Python API and required dependencies](#install-kinova-kortex-python-api-and-required-dependencies)
 - [How to use the examples](#how-to-use-the-examples)
 - [Python API documentation](#python-api-documentation)
 - [Reference](#reference)
@@ -38,12 +38,12 @@
 
 Refer to the main README for Python installation details: [parent readme](../../readme.md)
 
-<a id="markdown-install-python-module-kortex-api--the-needed-dependencies" name="install-python-module-kortex-api--the-needed-dependencies"></a>
-## Install Kortex Python API and required dependencies  
+<a id="markdown-install-python-module-kinova-kortex-api--the-needed-dependencies" name="install-python-module-kinova-kortex-api--the-needed-dependencies"></a>
+## Install KINOVA KORTEX™ Python API and required dependencies  
 
 Install what is needed to run the examples via a downloaded whl file (Python wheel package).
 
-The whl file can be downloaded via the Kinova Artifactory: [kortex_api](https://artifactory.kinovaapps.com/ui/api/v1/download?repoKey=generic-public&path=kortex%2FAPI%2F2.5.0%2Fkortex_api-2.5.0.post6-py3-none-any.whl)  
+The whl file can be downloaded via the Kinova Artifactory: [kortex_api](https://artifactory.kinovaapps.com:443/artifactory/generic-public/kortex/API/2.6.0/kortex_api-2.6.0.post3-py3-none-any.whl)  
 
 On Linux:
 
