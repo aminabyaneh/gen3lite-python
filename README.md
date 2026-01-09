@@ -12,9 +12,10 @@ The official repository contains documentation and examples explaining how to us
 ### Prerequisites
 - Download and install the latest Kortex API from the [official repository](https://github.com/Kinovarobotics/Kinova-kortex2_Gen3_G3L#download-links).
 - Ensure your Gen3 Lite has the latest firmware version according to the table.
-- Follow the installation instructions provided in the Kortex documentation.
+- Follow the installation instructions provided in the [Kortex documentation](kortex/readme.md).
 
 ### Connect to the robot
+- Set up the robot on the table (perhaps done already).
 - Connect the robot to a USB port as outlined in the [official guide](chrome-extension://efaidnbmnnnibpcajpcglclefindmkaj/https://static.generation-robots.com/media/Kinova-lite-fiche-technique.pdf).
 
 ### Launch connection scripts
@@ -22,7 +23,11 @@ The official repository contains documentation and examples explaining how to us
 - Make sure to use the correct IP and Port settings.
 - Double check the username and password.
 
-
+### Launching the sim
+- pip install pybullet
+- pip install numpy
+- Make sure to use the correct IP and Port settings.
+- Double check the username and password.
 
 ## About Kinova Kortex
 <img src="resources/kortex.png" alt="alt text" width="500">

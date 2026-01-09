@@ -18,14 +18,12 @@ from kortex_api.autogen.client_stubs.BaseClientRpc import BaseClient
 from kortex_api.autogen.messages import DeviceConfig_pb2, Session_pb2, Base_pb2
 
 
-
-################  IMPORTANT NOTE: remember to pass arguments such as ip, username, and password! #########################
-################  hardcoded for ease of use, but this is not the best practice. We use arguments later on. ###############
 class CONFIGS:
     IP = "192.168.1.1"
     PORT = 1024
     USERNAME = "admin"
     PASSWORD = "1234"
+
 
 def example_api_creation():
     '''

@@ -9,6 +9,10 @@
 * Refer to the LICENSE file for details.
 *
 -->
+```
+This folder is taken directly from Kinova Kortex official repo. We avoid using submodules at this point but make sure you have updated examples and the right API and Firmware versions as stated below.
+```
+---
 
 <h1>KINOVA<sup>®</sup> KORTEX™ API Reference</h1>
 
@@ -36,23 +40,23 @@ The repository has been tested on Windows 10, Ubuntu 16.04, Ubuntu 18.04 and Ubu
 <!-- /TOC -->
 
 <a id="markdown-licensing" name="licensing"></a>
-# Licensing 
-This repository is licenced under the [BSD 3-Clause "Revised" License](./LICENSE) 
+# Licensing
+This repository is licenced under the [BSD 3-Clause "Revised" License](./LICENSE)
 
 <a id="markdown-role-of-google-protobuf-in-kortex-api" name="role-of-google-protobuf-in-kortex-api"></a>
-# Role of Google Protocol Buffer in Kortex API 
+# Role of Google Protocol Buffer in Kortex API
 
-The Kortex API uses Google Protocol Buffer message objects<sup>**[1](#useful-links)**</sup> to exchange data between client and server.  
+The Kortex API uses Google Protocol Buffer message objects<sup>**[1](#useful-links)**</sup> to exchange data between client and server.
 
-Google Protocol Buffer offers structured data objects with standard methods for each member field:  
+Google Protocol Buffer offers structured data objects with standard methods for each member field:
 + structured, nested objects
 + basic types and collections
 + getter/setter methods on basic types
 + iterators, dimension and appending methods on collections
 + many helpers (e.g. serialize/deserialize, I/O functions)
-  
 
-When using the Kortex API a developer will need to understand the Google Protocol Buffer feature set to maximize their efficiency.  
+
+When using the Kortex API a developer will need to understand the Google Protocol Buffer feature set to maximize their efficiency.
 
 <a id="markdown-quick-start-howto-cpp" name="quick-start-howto-cpp"></a>
 ## Quick Start for C++ users
@@ -72,7 +76,7 @@ When using the Kortex API a developer will need to understand the Google Protoco
 
   Note that for C++ developers it could be useful to install the Python Kortex API to allow for quick tests and validations.
 
-  Here is some general information about the Python interpreter and the pip module manager.  
+  Here is some general information about the Python interpreter and the pip module manager.
   - [Python General Information](./linked_md/python_quick_start.md)
   - [API mechanism](./linked_md/python_api_mechanism.md)
   - [Transport / Router / Session / Notification](./linked_md/python_transport_router_session_notif.md)
@@ -130,8 +134,8 @@ Release 2.0.0 for Gen3: <a href="https://artifactory.kinovaapps.com/artifactory/
 
 # Build and Run instructions
 
-[C++ API](./api_cpp/examples/readme.md)  
-[Python API](./api_python/examples/readme.md) 
+[C++ API](./api_cpp/examples/readme.md)
+[Python API](./api_python/examples/readme.md)
 
 <a id="markdown-reference" name="reference"></a>
 # Reference
