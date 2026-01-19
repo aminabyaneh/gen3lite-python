@@ -65,18 +65,31 @@ class Gen3LiteArmController:
         for i in range(self.__n_joints):
             pb.resetJointState(self.__kinova_id, i, self.__home_poses[i])
 
-    def servoj(self, joints):
+    def move_to_joint_positions(self, joints, max_steps=100):
         """
         Move to target joint positions with position control.
-        """
-        pb.setJointMotorControlArray(
-            bodyIndex=self.__kinova_id,
-            jointIndices=self.joint_ids,
-            controlMode=pb.POSITION_CONTROL,
-            targetPositions=joints,
-            positionGains=[0.01]*6)
 
-    def move_to(self, target_pos, target_ori, max_steps=240, error_threshold=0.01):
+        Args:
+            joints (list): Target joint positions.
+            max_steps (int): Maximum simulation steps to reach the target.
+        """
+        for i in range(self.__n_joints):
+            pb.setJointMotorControl2(
+                bodyIndex=self.__kinova_id,
+                jointIndex=i,
+                controlMode=pb.POSITION_CONTROL,
+                targetPosition=joints[i],
+                force=500,
+                positionGain=0.05,
+                velocityGain=1
+            )
+
+        # Step the simulation for a short duration to allow movement.
+        for _ in range(max_steps):
+            pb.stepSimulation()
+            time.sleep(self.dt)
+
+    def move_to_cartesian(self, target_pos, target_ori, max_steps=240, error_threshold=0.01):
         """
         Moves the arm using inverse kinematics and closed-loop control until the end effector
         reaches the desired position and orientation within a threshold.
@@ -182,14 +195,19 @@ def main():
     pb.setTimeStep(controller.dt)
 
     # Test homing functionality
-    print("Testing Gen3Lite Arm controller homing...")
-    controller.move_to([0.4, 0, 0.4], controller.default_ori)
-    controller.move_to([-0.4, 0, 0.4], controller.default_ori)
+    print("\nTesting Gen3Lite Arm controller homing...")
+    controller.move_to_cartesian([0.4, 0, 0.4], controller.default_ori)
+    controller.move_to_cartesian([-0.4, 0, 0.4], controller.default_ori)
 
     # Test gripper functionality
-    print("Testing gripper open/close...")
+    print("\nTesting gripper open/close...")
     controller.open_gripper()
     controller.close_gripper()
+
+    # Test the direct joint control
+    print("\nTesting direct joint control...")
+    home_ = [0, 0, 0, 0, 0, -math.pi * 0.5, 0]
+    controller.move_to_joint_positions(home_)
 
     print("Homing test completed.")
     pb.disconnect()
