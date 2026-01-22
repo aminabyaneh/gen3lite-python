@@ -35,6 +35,10 @@ class Gen3LiteArmController:
         # End-effector link index as used in your URDF.
         self.END_EFFECTOR_INDEX = 7
 
+        pb.connect(pb.GUI)
+        pb.setGravity(0, 0, -9.8)
+        pb.setTimeStep(self.dt)
+
         # Load the Kinova Gen3 Lite URDF model.
         # Ensure the path "gen3lite_urdf/gen3_lite.urdf" exists in your directory
         self.__kinova_id = pb.loadURDF("gen3lite_urdf/gen3_lite.urdf", [0, 0, 0], useFixedBase=True)
@@ -53,18 +57,40 @@ class Gen3LiteArmController:
         self.joint_ids = [pb.getJointInfo(self.__kinova_id, i) for i in range(self.__n_joints)]
         self.joint_ids = [j[0] for j in self.joint_ids if j[2] == pb.JOINT_REVOLUTE]
 
-        # Initialize to rest position.
+        # Initialize to home position.
         for i in range(self.__n_joints):
-            pb.resetJointState(self.__kinova_id, i, self.__rest_poses[i])
+            pb.resetJointState(self.__kinova_id, i, self.__home_poses[i])
 
         self.default_ori = list(pb.getQuaternionFromEuler([0, -math.pi, 0]))
+        pb.configureDebugVisualizer(pb.COV_ENABLE_RENDERING, 0)
 
+    def getRanges(self):
+        return (self.__lower_limits,self.__upper_limits)
+    
+    def getCurrentJointAngles(self):
+        angles = []
+        for id in self.joint_ids:
+            joint_state = pb.getJointState(self.__kinova_id,id)
+            angles.append(joint_state[0])
+        return angles
+        
+    def createBalloonMaze(self):
+        for y in [-0.125, 0.125]:
+            for z in [0.25, 0.5]:
+                col_box_id = pb.createCollisionShape(pb.GEOM_SPHERE, radius=0.1)
+                box_id = pb.createMultiBody(baseMass=0, baseCollisionShapeIndex=col_box_id, basePosition=[0.4, y, z])
+    
     def set_to_home(self):
         """
         Resets the arm to its predefined home position.
         """
         for i in range(self.__n_joints):
             pb.resetJointState(self.__kinova_id, i, self.__home_poses[i])
+
+    def execPath(self,path):
+        pb.configureDebugVisualizer(pb.COV_ENABLE_RENDERING, 1)
+        for p in path:
+            self.move_to_joint_positions(p)
 
     def move_to_joint_positions(self, joints, max_steps=100):
         """
@@ -88,6 +114,11 @@ class Gen3LiteArmController:
         # Step the simulation for a short duration to allow movement.
         for _ in range(max_steps):
             pb.stepSimulation()
+            curr = self.getCurrentJointAngles()
+            e = np.linalg.norm(np.array(joints) - np.array(curr))
+            if e < 0.2:
+                break
+
             time.sleep(self.dt)
 
     def move_to_cartesian(self, target_pos, target_ori, max_steps=240, error_threshold=0.01):
@@ -182,6 +213,20 @@ class Gen3LiteArmController:
 
         print("Gripper closed.")
 
+    def set_joint_positions(self, joint_positions):
+        for joint_index, q in enumerate(joint_positions):
+            pb.resetJointState(self.__kinova_id, joint_index, q)
+
+    def collision_free(self,p1,p2):
+        
+        self.set_joint_positions(p1)
+        if self.check_collision():
+            return False
+        self.set_joint_positions(p2)
+        if self.check_collision():
+            return False
+        return True
+
     # ------------------------------------------------------------------
     # UPDATED COLLISION FUNCTION
     # ------------------------------------------------------------------
@@ -209,12 +254,11 @@ class Gen3LiteArmController:
                 contact_points = pb.getContactPoints(bodyA=self.__kinova_id, bodyB=other_body_id)
 
             # If contacts are found, return True immediately
-            if len(contact_points) > 0:
+            if contact_points is None or len(contact_points) > 0:
                 return True
 
         # If loop completes without returning, no collisions were found
         return False
-
 
 def main():
     """
@@ -222,7 +266,7 @@ def main():
     """
 
     # Initialize PyBullet simulation
-    pb.connect(pb.GUI, options="--opengl2")
+    pb.connect(pb.GUI)
     pb.setGravity(0, 0, -9.8)
 
     # Create the controller
@@ -231,21 +275,35 @@ def main():
 
     # Test homing functionality
     print("\nTesting Gen3Lite Arm controller homing...")
-    controller.move_to_cartesian([0.4, 0, 0.4], controller.default_ori)
+    controller.move_to_cartesian([0.5, 0, 0.375], controller.default_ori)
+    #controller.set_joint_positions([0, 0, 0.5 * math.pi, 0.5 * math.pi, 0.5 * math.pi, -math.pi * 0.5, 0])
 
     # --- COLLISION DETECTION TEST START ---
     print("\nTesting Collision Detection...")
 
-    # 1. Create a dummy box object
-    col_box_id = pb.createCollisionShape(pb.GEOM_BOX, halfExtents=[0.05, 0.05, 0.05])
+    for y in [-0.125, 0.125]:
+        for z in [0.25, 0.5]:
+            col_box_id = pb.createCollisionShape(pb.GEOM_SPHERE, radius=0.125)
+            box_id = pb.createMultiBody(baseMass=0, baseCollisionShapeIndex=col_box_id, basePosition=[0.4, y, z])
 
-    # 2. Spawn the box far away (at x=1.0)
-    box_id = pb.createMultiBody(baseMass=0, baseCollisionShapeIndex=col_box_id, basePosition=[1.0, 0, 0.5])
-    pb.stepSimulation()
+    #col_box_id = pb.createCollisionShape(pb.GEOM_SPHERE, halfExtents=[0.2, 0.2, 0.2])
+    #box_id = pb.createMultiBody(baseMass=0, baseCollisionShapeIndex=col_box_id, basePosition=[-1.0, 0, 0.5])
+
+    #col_box_id = pb.createCollisionShape(pb.GEOM_SPHERE, halfExtents=[0.2, 0.2, 0.2])
+    #box_id = pb.createMultiBody(baseMass=0, baseCollisionShapeIndex=col_box_id, basePosition=[0.0, 1.0, 0.5])
+
+    print(controller.getCurrentJointAngles())
+    for i in range (10000):
+        pb.stepSimulation()
+        time.sleep(1./240.)
+
+    pb.disconnect()
 
     # Note: No arguments passed to check_collision
     is_collision = controller.check_collision()
     print(f"Box at [1.0, 0, 0.5]. Collision detected? {is_collision} (Expected: False)")
+
+    return 
 
     # 3. Move the box to where the arm currently is (approx [0.4, 0, 0.4])
     print("Moving box to collide with arm...")
