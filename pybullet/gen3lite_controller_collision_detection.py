@@ -35,7 +35,7 @@ class Gen3LiteArmController:
         # End-effector link index as used in your URDF.
         self.END_EFFECTOR_INDEX = 7
 
-        pb.connect(pb.GUI)
+        pb.connect(pb.GUI,)
         pb.setGravity(0, 0, -9.8)
         pb.setTimeStep(self.dt)
 
@@ -106,17 +106,20 @@ class Gen3LiteArmController:
                 jointIndex=i,
                 controlMode=pb.POSITION_CONTROL,
                 targetPosition=joints[i],
-                force=500,
-                positionGain=0.05,
-                velocityGain=1
+                force=2000,
+                positionGain=1.0,
+                velocityGain=1.0
             )
 
         # Step the simulation for a short duration to allow movement.
-        for _ in range(max_steps):
+        for k in range(max_steps):
             pb.stepSimulation()
             curr = self.getCurrentJointAngles()
             e = np.linalg.norm(np.array(joints) - np.array(curr))
-            if e < 0.2:
+            print("Error at iter ", k, " is ", e)
+            print("Target: ", joints)
+            print("Current ", curr)
+            if e < 0.1:
                 break
 
             time.sleep(self.dt)
