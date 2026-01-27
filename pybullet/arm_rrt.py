@@ -3,7 +3,7 @@ from tqdm import tqdm
 from scipy.spatial import cKDTree
 import matplotlib.pyplot as plt
 import random
-import math
+
 import gen3lite_controller_collision_detection
 
 # -----------------------------
@@ -13,6 +13,18 @@ class Node:
     def __init__(self, point):
         self.point = np.array(point)
         self.parent = None
+
+class Tree:
+    def __init__(self,node_list,kdtree):
+        self.node_list = node_list
+        self.kdtree = kdtree
+    
+    def add(self,new_point):
+        self.node_list.append(new_point)
+        
+        if len(self.node_list) % 50 == 0:
+            data = [n.point for n in self.node_list]
+            self.kdtree = cKDTree(data)
 
 # -----------------------------
 # RRT Planner
@@ -26,44 +38,60 @@ class RRT:
         rand_area=[],
         step_size=0.1,
         goal_sample_rate=0.1,
-        max_iter=5000
+        max_iter=500000
     ):
         self.controller = gen3lite_controller_collision_detection.Gen3LiteArmController()
         self.controller.createBalloonMaze()
 
         self.start = Node(self.controller.getCurrentJointAngles())
-        self.goal = Node([0.1026325022237283, -0.2931188624740633, 1.2717083400432991, 0.048794139164578594, 0.07744723004754135, -0.8437927483158898, -0.024709326684397483])
+        self.goal = Node(self.controller.goal)
         self.rand_ranges = self.controller.getRanges()
         self.step_size = step_size
         self.goal_sample_rate = goal_sample_rate
         self.max_iter = max_iter
-        self.node_list = [self.start]
-        self.kdtree = cKDTree([self.start.point])
+        self.start_tree = Tree([self.start],cKDTree([self.start.point]))
+        self.goal_tree = Tree([self.goal],cKDTree([self.start.point]))
+
+    def add_node(self,tree):
+        rnd_point = self.sample()
+        nearest_node = self.nearest_node(rnd_point,tree)
+        new_node = self.steer(nearest_node, rnd_point)
+
+        if self.collision_free(nearest_node.point, new_node.point):
+            tree.add(new_node)
+
+        return new_node
 
     # -----------------------------
     # Main planning loop
+    #    returns: True when a path has been found
+    #             False if we have no path by the set number of iterations
     # -----------------------------
     def plan(self):
 
-        for _ in tqdm(range(self.max_iter)):
+        for k in tqdm(range(self.max_iter)):
+            if k % 2:
+                print("Adding to start")
+                new_node = self.add_node(self.start_tree)
 
-            rnd_point = self.sample()
-            nearest_node = self.nearest_node(rnd_point)
-            new_node = self.steer(nearest_node, rnd_point)
+                while(new_node is not None):
+                    ret = self.add_node(self.goal_tree,new_node)
+                    if ret == None:
+                        break
+                    if ret == self.TREES_CONNECT:
+                        print("Plan found!")
+                        
+            else:
+                print("Adding to goal tree")
+                new_node = self.add_node(self.goal_tree)
 
-            if self.collision_free(nearest_node.point, new_node.point):
-                self.node_list.append(new_node)
-
-                if len(self.node_list) % 50 == 0:
-                    data = [n.point for n in self.node_list]
-                    self.kdtree = cKDTree(data)
+                while(self.add_node(self.start_tree,new_node)):
 
                 if self.reached_goal(new_node):
-                    p = self.extract_path(new_node)
-                    self.controller.execPath(p)
-                    return p
+                    self.path_to_goal = self.extract_path(new_node)
+                    return True
 
-        return None  # Failed
+        return False
 
     # -----------------------------
     # Sampling
@@ -79,9 +107,9 @@ class RRT:
     # -----------------------------
     # Nearest node
     # -----------------------------
-    def nearest_node(self, point):
-         _, idx = self.kdtree.query(point)
-         return self.node_list[idx]
+    def nearest_node(self, point,tree):
+         _, idx = tree.kdtree.query(point)
+         return tree.node_list[idx]
 
     # -----------------------------
     # Steer
@@ -117,37 +145,6 @@ class RRT:
             path.append(node.point)
             node = node.parent
         return path[::-1]
-
-    # -----------------------------
-    # Visualization
-    # -----------------------------
-    def draw(self, path=None):
-        plt.figure()
-        for node in self.node_list:
-            if node.parent:
-                plt.plot(
-                    [node.point[0], node.parent.point[0]],
-                    [node.point[1], node.parent.point[1]],
-                    "-g"
-                )
-
-        for (ox, oy, r) in self.obstacles:
-            circle = plt.Circle((ox, oy), r, color="r")
-            plt.gca().add_patch(circle)
-
-        plt.plot(self.start.point[0], self.start.point[1], "bo", label="Start")
-        plt.plot(self.goal.point[0], self.goal.point[1], "ro", label="Goal")
-
-        if path:
-            px, py = zip(*path)
-            plt.plot(px, py, "-b", linewidth=2, label="Path")
-
-        plt.axis("equal")
-        plt.grid(True)
-        plt.legend()
-        plt.show()
-
-
 # -----------------------------
 # Example Usage
 # -----------------------------
@@ -155,7 +152,10 @@ if __name__ == "__main__":
 
     rrt = RRT()
 
-    path = rrt.plan()
-    print("Planning complete.")
-    print(path)
-    #rrt.draw(path)
+    success = rrt.plan()
+    if success:
+        rrt.controller.execPath(rrt.path_to_goal)
+        print("Planning complete. Moving the robot to the goal.")
+    else:
+        print("Failed to find a path to the goal.")
+    
