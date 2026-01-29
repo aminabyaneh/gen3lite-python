@@ -1,133 +1,52 @@
 import pybullet as pb
 import time
 import math
-from typing import Dict, List, Optional
-from enum import Enum
+from typing import List
 import numpy as np
-
-def draw_cylinder_between_points(p1, p2, radius=0.005, color=[0, 0, 1, 1]):
-    """
-    Draws a cylinder in PyBullet between two 3D points.
-    """
-    # 1. Calculate center position
-    center = [(p1[i] + p2[i]) / 2 for i in range(3)]
-    
-    # 2. Calculate distance (length of cylinder)
-    dist = math.sqrt(sum((p1[i] - p2[i])**2 for i in range(3)))
-    if dist == 0.0:
-        return None
-    
-    # 3. Calculate orientation (rotation from Y-axis to vector p2-p1)
-    # Default cylinder is aligned with Y-axis
-    v1 = [0, 1, 0] # Default orientation
-    v2 = [(p2[i] - p1[i]) / dist for i in range(3)] # Direction vector
-    
-    # Find axis of rotation (cross product) and angle (dot product)
-    axis = np.cross(v1, v2)
-    angle = math.acos(np.dot(v1, v2))
-    
-    if np.linalg.norm(axis) < 1e-6: # Check if vectors are parallel
-        if v2[1] < 0: # If opposite direction
-            q = [1, 0, 0, 0] # 180 degrees
-        else:
-            q = [0, 0, 0, 1] # Identity
-    else:
-        axis = axis / np.linalg.norm(axis)
-        q = pb.getQuaternionFromAxisAngle(axis, angle)
-        
-    # 4. Create visual shape
-    visual_shape_id = pb.createVisualShape(
-        shapeType=pb.GEOM_CYLINDER,
-        radius=radius,
-        length=dist,
-        rgbaColor=color
-    )
-    
-    # 5. Create multi-body to place in the scene
-    cylinder_id = pb.createMultiBody(
-        baseVisualShapeIndex=visual_shape_id,
-        basePosition=center,
-        baseOrientation=q
-    )
-    
-    return cylinder_id
-
-def get_quaternion_from_two_points(start_point, end_point):
-    """
-    Calculates a pybullet quaternion to orient an object's forward axis 
-    (assumed to be the positive X-axis) from start_point to end_point.
-    """
-    # Convert points to numpy arrays for easier vector math
-    start_point = np.array(start_point)
-    end_point = np.array(end_point)
-
-    # Calculate the direction vector
-    direction_vector = end_point - start_point
-    
-    # Normalize the direction vector
-    length = np.linalg.norm(direction_vector)
-    if length == 0:
-        return [0, 0, 0, 1] # Return identity quaternion if points are the same
-
-    unit_direction = direction_vector / length
-
-    # Calculate Euler angles for alignment (assuming forward is positive X-axis)
-    # The math might need adjustment based on the object's default "forward" direction in its URDF/model
-    pitch = math.asin(unit_direction[2]) # Z-component
-    yaw = math.atan2(unit_direction[1], unit_direction[0]) # Y and X components
-    roll = 0 # No roll needed to point at the target
-
-    # Convert Euler angles to a pybullet quaternion
-    quaternion = pb.getQuaternionFromEuler([roll, pitch, yaw])
-    return quaternion
 
 class Gen3LiteArmController(object):
     """
     A controller for the Kinova Gen3 Lite robotic arm in PyBullet.
 
-    This class provides methods to control the arm's joints, move the end-effector
-    to desired positions and orientations using inverse kinematics, and operate the gripper.
+    This class provides methods to control the arm's joints and interact 
+    with it surrounding environment through collision checking.
     """
-
     def __init__(self, dt=1 / 50.0):
+        
         self.dt = dt
-
-        self.LEFT_FINGER_JOINT = 7  # Example index; update if needed.
-        self.RIGHT_FINGER_JOINT = 9  # Example index; update if needed.
-        self.GRIPPER_OPEN_POS = 0.7  # Adjust as needed.
-        self.GRIPPER_CLOSED_POS = 0.0  # Adjust as needed.
-
-        # End-effector link index as used in your URDF.
-        self.END_EFFECTOR_INDEX = 7
-
         pb.connect(pb.GUI,)
         pb.setGravity(0, 0, -9.8)
         pb.setTimeStep(self.dt)
+        pb.configureDebugVisualizer(pb.COV_ENABLE_GUI, 0)
+        pb.configureDebugVisualizer(pb.COV_ENABLE_RENDERING, 0)
 
         # Load the Kinova Gen3 Lite URDF model.
         # Ensure the path "gen3lite_urdf/gen3_lite.urdf" exists in your directory
         self.__kinova_id = pb.loadURDF("gen3lite_urdf/gen3_lite.urdf", [0, 0, 0], useFixedBase=True)
         pb.resetBasePositionAndOrientation(self.__kinova_id, [0, 0, 0.0], [0, 0, 0, 1])
+        self.END_EFFECTOR_INDEX = 7
 
-        self.__n_joints = 7  # pb.getNumJoints(self.__kinova_id) - 5, where -5 for the gripper
-        print(f'Found {self.__n_joints} active joints for the robot.')
-
-        # Joint limits and rest/home poses.
+        self.__n_joints = 7 
         self.__lower_limits: List = [-.967, -2, -2.96, 0.19, -2.96, -2.09, -3.05]
         self.__upper_limits: List = [.967, 2, 2.96, 2.29, 2.96, 2.09, 3.05]
-        self.__joint_ranges: List = [5.8, 4, 5.8, 4, 5.8, 4, 6]
-        self.__rest_poses: List = [0, 0, 0, 0, 0, 0, 0]
         self.__home_poses: List = [math.pi, 0, 0.5 * math.pi, 0.5 * math.pi, 0.5 * math.pi, -math.pi * 0.5, 0]
 
         self.joint_ids = [pb.getJointInfo(self.__kinova_id, i) for i in range(self.__n_joints)]
         self.joint_ids = [j[0] for j in self.joint_ids if j[2] == pb.JOINT_REVOLUTE]
 
         # Initialize to home position.
-        for i in range(self.__n_joints):
-            pb.resetJointState(self.__kinova_id, i, self.__home_poses[i])
+        self.setToHome()
+ 
+        # This function creates obstacles and sets a reachable goal
+        self.createBalloonMaze()
 
-        self.default_ori = list(pb.getQuaternionFromEuler([0, -math.pi, 0]))
-        pb.configureDebugVisualizer(pb.COV_ENABLE_RENDERING, 0)
+        # Set the viewer's camera viewpoint
+        pb.resetDebugVisualizerCamera(
+            cameraDistance=1.5,
+            cameraYaw=-120,
+            cameraPitch=-10,
+            cameraTargetPosition=self.goalPosition
+        )
 
     def getRanges(self):
         return (self.__lower_limits,self.__upper_limits)
@@ -138,16 +57,41 @@ class Gen3LiteArmController(object):
             joint_state = pb.getJointState(self.__kinova_id,id)
             angles.append(joint_state[0])
         return angles
-        
-    def createBalloonMaze(self):
-        balloon_collision_id = pb.createCollisionShape(pb.GEOM_SPHERE, radius=0.11)
-        balloon_visual_id = pb.createVisualShape(pb.GEOM_SPHERE, radius=0.11,rgbaColor=[1.0,0.0,0.0,1.0])
+    
+    def setJointAngles(self, joint_angles):
+        for joint_index, q in enumerate(joint_angles):
+            pb.resetJointState(self.__kinova_id, joint_index, q)
 
+    def setToHome(self):
+        self.setJointAngles(self.__home_poses)
+
+    def execPath(self,path):
+        self.setJointAngles(self.__home_poses)
+        
+        pb.configureDebugVisualizer(pb.COV_ENABLE_RENDERING, 1)
+        for p in path:
+            self.setJointAngles(p)
+            time.sleep(0.25)
+
+    def createBalloonMaze(self):
+        balloon_collision_id = pb.createCollisionShape(pb.GEOM_SPHERE, radius=0.07)
+        balloon_visual_id = pb.createVisualShape(pb.GEOM_SPHERE, radius=0.07,rgbaColor=[1.0,0.0,0.0,0.5])
+
+        x = 0.4
         for y in [-0.125, 0.125]:
             for z in [0.25, 0.5]:
-                box_id = pb.createMultiBody(baseMass=0, basePosition=[0.4, y, z],baseCollisionShapeIndex=balloon_collision_id,
+                box_id = pb.createMultiBody(baseMass=0, basePosition=[x, y, z],baseCollisionShapeIndex=balloon_collision_id,
                 baseVisualShapeIndex=balloon_visual_id  
                 )
+
+        x = 0
+        balloon_collision_id = pb.createCollisionShape(pb.GEOM_SPHERE, radius=0.15)
+        balloon_visual_id = pb.createVisualShape(pb.GEOM_SPHERE, radius=0.15,rgbaColor=[1.0,0.0,0.0,0.5])
+        for y in [-0.3, 0.3]:
+            for z in [0.2, 0.6]:
+                box_id = pb.createMultiBody(baseMass=0, basePosition=[x, y, z],baseCollisionShapeIndex=balloon_collision_id,
+                baseVisualShapeIndex=balloon_visual_id  
+                )        
 
         # This is a hard-coded sensible goal to try to reach, in the middle of the four balloons.
         self.goal = [0.1026325022237283, -0.2931188624740633, 1.2717083400432991, 0.048794139164578594, 0.07744723004754135, -0.8437927483158898, -0.024709326684397483]
@@ -155,209 +99,83 @@ class Gen3LiteArmController(object):
         # Record where we were (usually home, but just to be safe...)
         curr = self.getCurrentJointAngles()
         # Move the arm to the goal, specified in joint angles
-        self.set_joint_positions(self.goal)
+        self.setJointAngles(self.goal)
         # Record the end effectors x,y,z position
         goal_state = pb.getLinkState(self.__kinova_id, self.END_EFFECTOR_INDEX)
+        self.goalPosition = goal_state[0]
         # Move the arm back to where it began
-        self.set_joint_positions(curr)
+        self.setJointAngles(curr)
 
         # Now we can make a visual marker for the goal
-        goal_visual_id = pb.createVisualShape(pb.GEOM_BOX, halfExtents=[0.05,0.05,0.05],rgbaColor=[0.0,0.0,1.0,1.0])
+        goal_visual_id = pb.createVisualShape(pb.GEOM_BOX, halfExtents=[0.05,0.05,0.05],rgbaColor=[0.0,0.0,1.0,0.5])
         box_id = pb.createMultiBody(baseMass=0, basePosition=goal_state[0], baseVisualShapeIndex=goal_visual_id )
     
-    def visTree(self,tree,rgba_in):
+    def visTreesAndPaths(self,trees,paths,rgbas_in):
         
         pb.configureDebugVisualizer(pb.COV_ENABLE_RENDERING, 0)
 
-        for n in tree.node_list:
-            parent = n.parent
-            if not parent is None:
-                self.set_joint_positions(n.point)
-                n_pos = pb.getLinkState(self.__kinova_id, self.END_EFFECTOR_INDEX)
-        
-                self.set_joint_positions(parent.point)
-                parent_pos = pb.getLinkState(self.__kinova_id, self.END_EFFECTOR_INDEX)
+        for tree_idx in range(len(trees)):
+            tree = trees[tree_idx]
+            rgba_in = rgbas_in[tree_idx]
+            for n in tree.node_list:
+                parent = n.parent
+                if not parent is None:
+                    self.setJointAngles(n.point)
+                    n_pos = pb.getLinkState(self.__kinova_id, self.END_EFFECTOR_INDEX)
+            
+                    self.setJointAngles(parent.point)
+                    parent_pos = pb.getLinkState(self.__kinova_id, self.END_EFFECTOR_INDEX)
 
-                draw_cylinder_between_points(n_pos[0],parent_pos[0],color=rgba_in)
+                    point_vis_id = pb.createVisualShape(pb.GEOM_SPHERE, radius=0.005,rgbaColor=rgba_in)
+                    node_sphere_id = pb.createMultiBody(baseMass=0, basePosition=n_pos[0], baseVisualShapeIndex=point_vis_id )
 
-                #q = get_quaternion_from_two_points(n_pos[0],parent_pos[0])
-                #height = np.linalg.norm(np.array(n_pos[0])-np.array(parent_pos[0]))
-                #branch_vis_id = pb.createVisualShape(pb.GEOM_CAPSULE, length=height,radius=0.005,rgbaColor=rgba_in)
-                #box_id = pb.createMultiBody(baseMass=0, basePosition=n_pos[0],baseOrientation=q, baseVisualShapeIndex=branch_vis_id )
+                    pb.addUserDebugLine(lineFromXYZ=n_pos[0],lineToXYZ=parent_pos[0],lineColorRGB=rgba_in[0:3],lineWidth=0.01,lifeTime=0)
+
+        point_vis_id = pb.createVisualShape(pb.GEOM_SPHERE, radius=0.01,
+                                            rgbaColor=[1.0, 1.0, 0.0, 0.5])
+
+        for path in paths:
+            for idx in range(len(path)):
+                    
+                    self.setJointAngles(path[idx])
+                    parent_pos = pb.getLinkState(self.__kinova_id, self.END_EFFECTOR_INDEX)
+
+                    node_sphere_id = pb.createMultiBody(baseMass=0, basePosition=parent_pos[0], baseVisualShapeIndex=point_vis_id )
+
+                    if idx+1 < len(path):
+                        self.setJointAngles(path[idx+1])
+                        child_pos = pb.getLinkState(self.__kinova_id, self.END_EFFECTOR_INDEX)
+
+                        pb.addUserDebugLine(lineFromXYZ=parent_pos[0],lineToXYZ=child_pos[0],lineColorRGB=[1.0, 1.0, 0.0],lineWidth=0.02,lifeTime=0)
         
-        self.set_joint_positions(self.__home_poses)
+        self.setToHome()
         pb.configureDebugVisualizer(pb.COV_ENABLE_RENDERING, 1)
-        print("Finished plotting tree")
+        print("Finished plotting tree. Press q to continue.")
+
         while True:
             pb.stepSimulation()
             time.sleep(1./240.)
 
             keys = pb.getKeyboardEvents()
     
-            # Check if 'q' (ASCII 113) is pressed
             if ord('q') in keys and keys[ord('q')] & pb.KEY_WAS_TRIGGERED:
-                print("Quit key pressed. Exiting...")
+                print("Q pressed. Continuing.")
                 break
-
-    def set_to_home(self):
-        """
-        Resets the arm to its predefined home position.
-        """
-        for i in range(self.__n_joints):
-            pb.resetJointState(self.__kinova_id, i, self.__home_poses[i])
-
-    def execPath(self,path):
-        self.set_joint_positions(self.__home_poses)
-        
-        pb.configureDebugVisualizer(pb.COV_ENABLE_RENDERING, 1)
-        for p in path:
-            self.set_joint_positions(p)
-            time.sleep(0.25)
-            #self.move_to_joint_positions(p)
-
-    def move_to_joint_positions(self, joints, max_steps=20):
-        """
-        Move to target joint positions with position control.
-
-        Args:
-            joints (list): Target joint positions.
-            max_steps (int): Maximum simulation steps to reach the target.
-        """
-        for i in range(self.__n_joints):
-            pb.setJointMotorControl2(
-                bodyIndex=self.__kinova_id,
-                jointIndex=i,
-                controlMode=pb.POSITION_CONTROL,
-                targetPosition=joints[i],
-                force=2000,
-                positionGain=1.0,
-                velocityGain=1.0,
-                maxVelocity=0.3
-            )
-
-        # Step the simulation for a short duration to allow movement.
-        for k in range(max_steps):
-            pb.stepSimulation()
-            curr = self.getCurrentJointAngles()
-            e = np.linalg.norm(np.array(joints) - np.array(curr))
-            #print("Error at iter ", k, " is ", e)
-            #print("Target: ", joints)
-            #print("Current ", curr)
-            if e < 0.1:
-                break
-
-            time.sleep(self.dt)
-
-    def move_to_cartesian(self, target_pos, target_ori, max_steps=240, error_threshold=0.01):
-        """
-        Moves the arm using inverse kinematics and closed-loop control until the end effector
-        reaches the desired position and orientation within a threshold.
-
-        Args:
-            target_pos (list or np.array): Desired end-effector position [x, y, z].
-            target_ori (list or np.array): Desired end-effector orientation (quaternion).
-            max_steps (int): Maximum number of simulation steps to try.
-            error_threshold (float): Acceptable Euclidean distance (in meters) between
-                                    the current and target positions.
-        """
-
-        # Calculate the inverse kinematics solution.
-        jointPoses = pb.calculateInverseKinematics(
-            self.__kinova_id,
-            self.END_EFFECTOR_INDEX,
-            target_pos,
-            target_ori,
-            lowerLimits=self.__lower_limits,
-            upperLimits=self.__upper_limits,
-            jointRanges=self.__joint_ranges,
-            restPoses=self.__rest_poses,
-            maxNumIterations=100
-        )
-
-        # Slice the IK solution so that only the controlled joints are used.
-        jointPoses = jointPoses[:self.__n_joints]
-
-        for step in range(max_steps):
-            # Command each joint to the desired position.
-            for i in range(self.__n_joints):
-                pb.setJointMotorControl2(
-                    bodyIndex=self.__kinova_id,
-                    jointIndex=i,
-                    controlMode=pb.POSITION_CONTROL,
-                    targetPosition=jointPoses[i],
-                    force=500,
-                    positionGain=0.05,
-                    velocityGain=1
-                )
-
-            # Step the simulation.
-            pb.stepSimulation()
-            time.sleep(self.dt)
-
-            # Get the current end-effector state.
-            ee_state = pb.getLinkState(self.__kinova_id, self.END_EFFECTOR_INDEX)
-            current_pos = np.array(ee_state[0])
-            current_error = np.linalg.norm(np.array(target_pos) - current_pos)
-
-            # If within threshold, break out.
-            if current_error < error_threshold:
-                print("Target reached within threshold.")
-                break
-
-        # Final achieved state.
-        final_state = pb.getLinkState(self.__kinova_id, self.END_EFFECTOR_INDEX)
-        final_pos = final_state[0]
-        final_ori = final_state[1]
-
-        print("Target end-effector position:", target_pos)
-        print("Final achieved end-effector position:", final_pos)
-
-    def open_gripper(self):
-        """
-        Opens the gripper.
-        """
-        pb.setJointMotorControl2(self.__kinova_id, self.LEFT_FINGER_JOINT, pb.POSITION_CONTROL,
-                                 targetPosition=self.GRIPPER_OPEN_POS, force=500)
-        pb.setJointMotorControl2(self.__kinova_id, self.RIGHT_FINGER_JOINT, pb.POSITION_CONTROL,
-                                 targetPosition=-self.GRIPPER_OPEN_POS, force=500)
-        for _ in range(100):
-            pb.stepSimulation()
-            time.sleep(self.dt)
-
-        print("Gripper opened.")
-
-    def close_gripper(self):
-        """
-        Closes the gripper.
-        """
-        pb.setJointMotorControl2(self.__kinova_id, self.LEFT_FINGER_JOINT, pb.POSITION_CONTROL,
-                                 targetPosition=self.GRIPPER_CLOSED_POS, force=500)
-        pb.setJointMotorControl2(self.__kinova_id, self.RIGHT_FINGER_JOINT, pb.POSITION_CONTROL,
-                                 targetPosition=self.GRIPPER_CLOSED_POS, force=500)
-        for _ in range(100):
-            pb.stepSimulation()
-            time.sleep(self.dt)
-
-        print("Gripper closed.")
-
-    def set_joint_positions(self, joint_positions):
-        for joint_index, q in enumerate(joint_positions):
-            pb.resetJointState(self.__kinova_id, joint_index, q)
 
     def collision_free(self,p1,p2):
         
-        self.set_joint_positions(p1)
+        self.setJointAngles(p1)
         if self.check_collision():
             return False
-        self.set_joint_positions(p2)
+        self.setJointAngles(p2)
         if self.check_collision():
             return False
         return True
 
     def check_collision(self):
         """
-        Checks for collisions between the robot and ANY other body in the environment,
-        as well as self-collisions (robot links hitting each other).
+        Checks for collisions between the robot and ANY other body in the environment, as well as self-collisions 
+        (robot links hitting each other).
 
         Returns:
             bool: True if any collision is detected, False otherwise.
@@ -376,36 +194,3 @@ class Gen3LiteArmController(object):
 
         # If loop completes without returning, no collisions were found
         return False
-
-def main():
-    """
-    This is a dummy main function that won't be used for the core A2 planning but 
-    gives you some idea for how to see the Gen3Lite Arm moving, gripper functionalities, and collision detection.
-    """
-    controller = Gen3LiteArmController()
-
-    # Test homing functionality
-    print("\nTesting Gen3Lite Arm controller homing...")
-    controller.move_to_cartesian([0.5, 0, 0.375], controller.default_ori)
-    #controller.set_joint_positions([0, 0, 0.5 * math.pi, 0.5 * math.pi, 0.5 * math.pi, -math.pi * 0.5, 0])
-
-    # --- COLLISION DETECTION TEST START ---
-    print("\nTesting Collision Detection...")
-
-    for y in [-0.125, 0.125]:
-        for z in [0.25, 0.5]:
-            col_box_id = pb.createCollisionShape(pb.GEOM_SPHERE, radius=0.125)
-            box_id = pb.createMultiBody(baseMass=0, baseCollisionShapeIndex=col_box_id, basePosition=[0.4, y, z])
-
-    print(controller.getCurrentJointAngles())
-    for i in range (10000):
-        pb.stepSimulation()
-        time.sleep(1./240.)
-
-    is_collision = controller.check_collision()
-    print("Check collision returned: ",is_collision)
-
-    pb.disconnect()
-
-if __name__ == "__main__":
-    main()
