@@ -38,7 +38,7 @@ class RRT:
         rand_area=[],
         step_size=0.1,
         goal_sample_rate=0.1,
-        max_iter=500000
+        max_iter=5
     ):
         self.controller = gen3lite_controller_collision_detection.Gen3LiteArmController()
         self.controller.createBalloonMaze()
@@ -50,17 +50,21 @@ class RRT:
         self.goal_sample_rate = goal_sample_rate
         self.max_iter = max_iter
         self.start_tree = Tree([self.start],cKDTree([self.start.point]))
-        self.goal_tree = Tree([self.goal],cKDTree([self.start.point]))
+        self.goal_tree = Tree([self.goal],cKDTree([self.goal.point]))
 
-    def add_node(self,tree):
-        rnd_point = self.sample()
+    def add_node(self,tree,target=None):
+        if target is None:
+            rnd_point = self.sample()
+        else:
+            rnd_point = target.point
         nearest_node = self.nearest_node(rnd_point,tree)
         new_node = self.steer(nearest_node, rnd_point)
 
         if self.collision_free(nearest_node.point, new_node.point):
             tree.add(new_node)
-
-        return new_node
+            return new_node
+        else:
+            return None
 
     # -----------------------------
     # Main planning loop
@@ -71,25 +75,35 @@ class RRT:
 
         for k in tqdm(range(self.max_iter)):
             if k % 2:
-                print("Adding to start")
+                #print("Adding to start")
                 new_node = self.add_node(self.start_tree)
 
                 while(new_node is not None):
                     ret = self.add_node(self.goal_tree,new_node)
                     if ret == None:
                         break
-                    if ret == self.TREES_CONNECT:
+                    if self.reached_goal(ret,goal=new_node):
                         print("Plan found!")
+                        print(new_node.point,ret.point)
+                        self.path_to_goal = self.extract_path(new_node,ret)
+                        print(self.path_to_goal)
+                        return True
                         
             else:
-                print("Adding to goal tree")
+                #print("Adding to goal tree")
                 new_node = self.add_node(self.goal_tree)
 
-                while(self.add_node(self.start_tree,new_node)):
+                while(new_node is not None):
+                    ret = self.add_node(self.start_tree,new_node)
+                    if ret == None:
+                        break
 
-                if self.reached_goal(new_node):
-                    self.path_to_goal = self.extract_path(new_node)
-                    return True
+                    if self.reached_goal(ret,goal=new_node):
+                        print("Plan found!")
+                        print(ret.point,new_node.point)
+                        self.path_to_goal = self.extract_path(ret,new_node)
+                        print(self.path_to_goal)
+                        return True
 
         return False
 
@@ -117,9 +131,13 @@ class RRT:
     def steer(self, from_node, to_point):
         direction = to_point - from_node.point
         distance = np.linalg.norm(direction)
-        direction = direction / distance
 
-        new_point = from_node.point + self.step_size * direction
+        if distance < self.step_size:
+            new_point = to_point
+        else:
+            direction = direction / distance
+            new_point = from_node.point + self.step_size * direction
+
         new_node = Node(new_point)
         new_node.parent = from_node
         return new_node
@@ -133,29 +151,65 @@ class RRT:
     # -----------------------------
     # Goal check
     # -----------------------------
-    def reached_goal(self, node):
-        return np.linalg.norm(node.point - self.goal.point) < self.step_size
+    def reached_goal(self, node,goal=None):
+        if goal is None:
+            goal = self.goal
+        
+        return np.linalg.norm(node.point - goal.point) < self.step_size and self.collision_free(node.point,goal.point)
 
     # -----------------------------
     # Path extraction
     # -----------------------------
-    def extract_path(self, node):
-        path = [self.goal.point]
-        while node is not None:
-            path.append(node.point)
-            node = node.parent
-        return path[::-1]
+    def extract_path(self, start_node,goal_node):
+        # Build the start-tree path backwards
+        start_tree_path = []
+        while start_node is not None:
+            start_tree_path.append(start_node.point)
+            start_node = start_node.parent
+
+        print("Start path",start_tree_path)
+
+        # Build the goal-tree path forwards
+        goal_tree_path = []
+        while goal_node is not None:
+            goal_tree_path.append(goal_node.point)
+            goal_node = goal_node.parent 
+
+        print("Goal path: ", goal_tree_path)
+        overall_path = start_tree_path[::-1]
+        overall_path.extend(goal_tree_path)
+        print("Overall path",overall_path)
+        return overall_path
 # -----------------------------
 # Example Usage
 # -----------------------------
 if __name__ == "__main__":
 
-    rrt = RRT()
+    import argparse
 
-    success = rrt.plan()
-    if success:
-        rrt.controller.execPath(rrt.path_to_goal)
-        print("Planning complete. Moving the robot to the goal.")
-    else:
-        print("Failed to find a path to the goal.")
+    parser = argparse.ArgumentParser(
+                    prog='arm_rrt',
+                    description='Plans and executes paths for arms around obstacles.')
+    parser.add_argument('--filename',default='rrt_path.npy')           
+    parser.add_argument('-p', '--plan',action='store_true')
+    parser.add_argument('-e', '--exec',action='store_true')
+    args = parser.parse_args()
+
+    if args.plan:
+        rrt = RRT()
+        success = rrt.plan()
+
+        if success:
+            print("Tree planning reached the goal.")
+            np.save(args.filename,rrt.path_to_goal)
+        else:
+            print("Failed to find a path to the goal.")
+
+        rrt.controller.visTree(rrt.start_tree,rgba_in=[0.5,0.0,0.5,1.0])
+        rrt.controller.visTree(rrt.goal_tree,rgba_in=[0.902,0.106,0.714,1.0])
+
+    if args.exec:
+        path_to_goal = np.load(args.filename)
+        rrt = RRT()
+        rrt.controller.execPath(path_to_goal)
     

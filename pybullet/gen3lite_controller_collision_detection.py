@@ -5,6 +5,82 @@ from typing import Dict, List, Optional
 from enum import Enum
 import numpy as np
 
+def draw_cylinder_between_points(p1, p2, radius=0.005, color=[0, 0, 1, 1]):
+    """
+    Draws a cylinder in PyBullet between two 3D points.
+    """
+    # 1. Calculate center position
+    center = [(p1[i] + p2[i]) / 2 for i in range(3)]
+    
+    # 2. Calculate distance (length of cylinder)
+    dist = math.sqrt(sum((p1[i] - p2[i])**2 for i in range(3)))
+    if dist == 0.0:
+        return None
+    
+    # 3. Calculate orientation (rotation from Y-axis to vector p2-p1)
+    # Default cylinder is aligned with Y-axis
+    v1 = [0, 1, 0] # Default orientation
+    v2 = [(p2[i] - p1[i]) / dist for i in range(3)] # Direction vector
+    
+    # Find axis of rotation (cross product) and angle (dot product)
+    axis = np.cross(v1, v2)
+    angle = math.acos(np.dot(v1, v2))
+    
+    if np.linalg.norm(axis) < 1e-6: # Check if vectors are parallel
+        if v2[1] < 0: # If opposite direction
+            q = [1, 0, 0, 0] # 180 degrees
+        else:
+            q = [0, 0, 0, 1] # Identity
+    else:
+        axis = axis / np.linalg.norm(axis)
+        q = pb.getQuaternionFromAxisAngle(axis, angle)
+        
+    # 4. Create visual shape
+    visual_shape_id = pb.createVisualShape(
+        shapeType=pb.GEOM_CYLINDER,
+        radius=radius,
+        length=dist,
+        rgbaColor=color
+    )
+    
+    # 5. Create multi-body to place in the scene
+    cylinder_id = pb.createMultiBody(
+        baseVisualShapeIndex=visual_shape_id,
+        basePosition=center,
+        baseOrientation=q
+    )
+    
+    return cylinder_id
+
+def get_quaternion_from_two_points(start_point, end_point):
+    """
+    Calculates a pybullet quaternion to orient an object's forward axis 
+    (assumed to be the positive X-axis) from start_point to end_point.
+    """
+    # Convert points to numpy arrays for easier vector math
+    start_point = np.array(start_point)
+    end_point = np.array(end_point)
+
+    # Calculate the direction vector
+    direction_vector = end_point - start_point
+    
+    # Normalize the direction vector
+    length = np.linalg.norm(direction_vector)
+    if length == 0:
+        return [0, 0, 0, 1] # Return identity quaternion if points are the same
+
+    unit_direction = direction_vector / length
+
+    # Calculate Euler angles for alignment (assuming forward is positive X-axis)
+    # The math might need adjustment based on the object's default "forward" direction in its URDF/model
+    pitch = math.asin(unit_direction[2]) # Z-component
+    yaw = math.atan2(unit_direction[1], unit_direction[0]) # Y and X components
+    roll = 0 # No roll needed to point at the target
+
+    # Convert Euler angles to a pybullet quaternion
+    quaternion = pb.getQuaternionFromEuler([roll, pitch, yaw])
+    return quaternion
+
 class Gen3LiteArmController(object):
     """
     A controller for the Kinova Gen3 Lite robotic arm in PyBullet.
@@ -41,7 +117,7 @@ class Gen3LiteArmController(object):
         self.__upper_limits: List = [.967, 2, 2.96, 2.29, 2.96, 2.09, 3.05]
         self.__joint_ranges: List = [5.8, 4, 5.8, 4, 5.8, 4, 6]
         self.__rest_poses: List = [0, 0, 0, 0, 0, 0, 0]
-        self.__home_poses: List = [0, 0, -0.5 * math.pi, 0.5 * math.pi, 0.5 * math.pi, -math.pi * 0.5, 0]
+        self.__home_poses: List = [math.pi, 0, 0.5 * math.pi, 0.5 * math.pi, 0.5 * math.pi, -math.pi * 0.5, 0]
 
         self.joint_ids = [pb.getJointInfo(self.__kinova_id, i) for i in range(self.__n_joints)]
         self.joint_ids = [j[0] for j in self.joint_ids if j[2] == pb.JOINT_REVOLUTE]
@@ -64,12 +140,12 @@ class Gen3LiteArmController(object):
         return angles
         
     def createBalloonMaze(self):
-        balloon_collision_id = pb.createCollisionShape(pb.GEOM_SPHERE, radius=0.1)
-        balloon_visual_id = pb.createVisualShape(pb.GEOM_SPHERE, radius=0.1,rgbaColor=[1.0,0.0,0.0,1.0])
+        balloon_collision_id = pb.createCollisionShape(pb.GEOM_SPHERE, radius=0.11)
+        balloon_visual_id = pb.createVisualShape(pb.GEOM_SPHERE, radius=0.11,rgbaColor=[1.0,0.0,0.0,1.0])
 
         for y in [-0.125, 0.125]:
             for z in [0.25, 0.5]:
-                box_id = pb.createMultiBody(baseMass=0, basePosition=[0.3, y, z],baseCollisionShapeIndex=balloon_collision_id,
+                box_id = pb.createMultiBody(baseMass=0, basePosition=[0.4, y, z],baseCollisionShapeIndex=balloon_collision_id,
                 baseVisualShapeIndex=balloon_visual_id  
                 )
 
@@ -89,6 +165,40 @@ class Gen3LiteArmController(object):
         goal_visual_id = pb.createVisualShape(pb.GEOM_BOX, halfExtents=[0.05,0.05,0.05],rgbaColor=[0.0,0.0,1.0,1.0])
         box_id = pb.createMultiBody(baseMass=0, basePosition=goal_state[0], baseVisualShapeIndex=goal_visual_id )
     
+    def visTree(self,tree,rgba_in):
+        
+        pb.configureDebugVisualizer(pb.COV_ENABLE_RENDERING, 0)
+
+        for n in tree.node_list:
+            parent = n.parent
+            if not parent is None:
+                self.set_joint_positions(n.point)
+                n_pos = pb.getLinkState(self.__kinova_id, self.END_EFFECTOR_INDEX)
+        
+                self.set_joint_positions(parent.point)
+                parent_pos = pb.getLinkState(self.__kinova_id, self.END_EFFECTOR_INDEX)
+
+                draw_cylinder_between_points(n_pos[0],parent_pos[0],color=rgba_in)
+
+                #q = get_quaternion_from_two_points(n_pos[0],parent_pos[0])
+                #height = np.linalg.norm(np.array(n_pos[0])-np.array(parent_pos[0]))
+                #branch_vis_id = pb.createVisualShape(pb.GEOM_CAPSULE, length=height,radius=0.005,rgbaColor=rgba_in)
+                #box_id = pb.createMultiBody(baseMass=0, basePosition=n_pos[0],baseOrientation=q, baseVisualShapeIndex=branch_vis_id )
+        
+        self.set_joint_positions(self.__home_poses)
+        pb.configureDebugVisualizer(pb.COV_ENABLE_RENDERING, 1)
+        print("Finished plotting tree")
+        while True:
+            pb.stepSimulation()
+            time.sleep(1./240.)
+
+            keys = pb.getKeyboardEvents()
+    
+            # Check if 'q' (ASCII 113) is pressed
+            if ord('q') in keys and keys[ord('q')] & pb.KEY_WAS_TRIGGERED:
+                print("Quit key pressed. Exiting...")
+                break
+
     def set_to_home(self):
         """
         Resets the arm to its predefined home position.
@@ -101,7 +211,9 @@ class Gen3LiteArmController(object):
         
         pb.configureDebugVisualizer(pb.COV_ENABLE_RENDERING, 1)
         for p in path:
-            self.move_to_joint_positions(p)
+            self.set_joint_positions(p)
+            time.sleep(0.25)
+            #self.move_to_joint_positions(p)
 
     def move_to_joint_positions(self, joints, max_steps=20):
         """
