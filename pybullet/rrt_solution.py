@@ -3,12 +3,12 @@ from tqdm import tqdm
 from scipy.spatial import cKDTree
 import random
 import argparse
-import robots
+import gen3lite_controller_collision_detection
 
 class Node:
-    def __init__(self, point, parent=None):
+    def __init__(self, point):
         self.point = np.array(point)
-        self.parent = parent
+        self.parent = None
 
 class Tree:
     def __init__(self, node_list, kdtree):
@@ -23,8 +23,8 @@ class Tree:
             self.kdtree = cKDTree(data)
 
 class RRT:
-    def __init__(self, step_size=0.1,max_iter=20,env_name="Free"):
-        self.controller = robots.Gen3LiteArmController(env_name=env_name)
+    def __init__(self, step_size=0.1,max_iter=50000,env_name="Free"):
+        self.controller = gen3lite_controller_collision_detection.Gen3LiteArmController(env_name=env_name)
 
         self.start = Node(self.controller.getCurrentJointAngles())
         self.goal = Node(self.controller.goal_angles)
@@ -35,38 +35,47 @@ class RRT:
         self.goal_tree = Tree([self.goal],cKDTree([self.goal.point]))
         self.path_to_goal = []
 
-    # This a "stub" planning function. It adds random nodes always
-    # to the root of a start and goal tree. It shows many of the 
-    # syntax elements and helper functions you could use, but 
-    # you will have to fix and extend this to make it an RRT or 
-    # RRT-Connect planner that can solve the harder environments.
+    def add_node(self,tree,target=None):
+        if target is None:
+            rnd_point = self.sample()
+        else:
+            rnd_point = target.point
+        nearest_node = self.nearest_node(rnd_point,tree)
+        new_node = self.steer(nearest_node, rnd_point)
+
+        if self.collision_free(nearest_node.point, new_node.point):
+            tree.add(new_node)
+            return new_node
+        else:
+            return None
+
     def plan(self):
 
-        # Add max_iter nodes to each start and goal tree
         for k in tqdm(range(self.max_iter)):
-            rnd_point = self.sample()
-            if self.collision_free(rnd_point, self.start.point):
-                new_node = Node(rnd_point,self.start)
-                self.start_tree.add(new_node)
+            if k % 2:
+                new_node = self.add_node(self.start_tree)
 
-            rnd_point = self.sample()
-            if self.collision_free(rnd_point, self.goal.point):
-                new_node = Node(rnd_point,self.goal)
-                self.goal_tree.add(new_node)
+                while(new_node is not None):
+                    ret = self.add_node(self.goal_tree,new_node)
+                    if ret == None:
+                        break
+                    if self.reached_goal(ret,goal=new_node):
+                        self.path_to_goal = self.extract_path(new_node,ret)
+                        return True
+                        
+            else:
+                new_node = self.add_node(self.goal_tree)
 
-        # Now add the same rnd_pnt to both trees, making a connection
-        # and completing the path start->goal
-        rnd_point = self.sample()   
-        if self.collision_free(rnd_point, self.start.point):
-            new_start_node = Node(rnd_point,self.start)
-            self.start_tree.add(new_start_node)
+                while(new_node is not None):
+                    ret = self.add_node(self.start_tree,new_node)
+                    if ret == None:
+                        break
 
-        if self.collision_free(rnd_point, self.goal.point):
-            new_goal_node = Node(rnd_point,self.goal)
-            self.goal_tree.add(new_goal_node)
+                    if self.reached_goal(ret,goal=new_node):
+                        self.path_to_goal = self.extract_path(ret,new_node)
+                        return True
 
-        self.path_to_goal = self.extract_path(new_start_node,new_goal_node)
-        return True
+        return False
 
     def sample(self):
         point = []
